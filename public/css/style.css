@@ -1,0 +1,289 @@
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+
+body {
+    height: 100dvh;
+    overscroll-behavior: none;
+}
+
+/* Video alanı dış çerçeve boşluklarını sıfırla (Tailwind p-2'yi ezer) */
+#videoArea:not(.floating-popup) {
+    padding: 0 !important;
+}
+
+/* ==========================================
+   🎯 SPOTLIGHT (SAHNE) GÖRÜNÜMÜ STİLLERİ
+   ========================================== */
+#videoGrid.spotlight-layout {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0px !important;
+    padding: 0px !important;
+    height: 100% !important;
+    width: 100% !important;
+    overflow: hidden !important;
+}
+
+/* Sahnedeki (Merkezdeki) Ana Kamera / Ekran Paylaşımı */
+#videoGrid.spotlight-layout .spotlight-main-tile {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    border-radius: 0px !important;
+    border: 1px solid rgba(88, 101, 242, 0.5) !important;
+    background: #111214 !important;
+    order: 1 !important;
+}
+
+#videoGrid.spotlight-layout .spotlight-main-tile video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+}
+
+/* Alt Şerit (Filmstrip) Kapsayıcısı */
+#spotlightFilmstrip {
+    display: flex;
+    align-items: stretch;
+    gap: 0px;
+    height: 116px;
+    min-height: 116px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0px;
+    order: 2;
+    scrollbar-width: thin;
+    background: #111214;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Şeritteki Küçük Kameralar */
+#spotlightFilmstrip > div,
+#spotlightFilmstrip .video-wrapper {
+    flex: 0 0 175px !important;
+    width: 175px !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+    border-radius: 0px !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+#spotlightFilmstrip > div:hover {
+    border-color: rgba(88, 101, 242, 0.6) !important;
+}
+
+@media (max-width: 768px) {
+    #spotlightFilmstrip {
+        height: 92px;
+        min-height: 92px;
+    }
+    #spotlightFilmstrip > div,
+    #spotlightFilmstrip .video-wrapper {
+        flex: 0 0 130px !important;
+        width: 130px !important;
+    }
+}
+
+/* Sabitleme (Pin) Rozeti */
+.spotlight-pin-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 20;
+    background: rgba(17, 18, 20, 0.78);
+    backdrop-filter: blur(4px);
+    color: #e5e7eb;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+div:hover > .spotlight-pin-badge,
+.spotlight-pin-badge.is-pinned {
+    opacity: 1;
+}
+
+.spotlight-pin-badge.is-pinned {
+    background: #5865F2;
+    color: #ffffff;
+}
+
+/* ==========================================
+   📐 BOŞLUKSUZ (ZERO-GAP) DİNAMİK VİDEO GRİD
+   ========================================== */
+#videoGrid,
+.video-grid {
+    display: grid !important;
+    width: 100% !important;
+    height: 100% !important;
+    gap: 0px !important;
+    padding: 0px !important;
+    margin: 0px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    align-items: stretch !important;
+    justify-items: stretch !important;
+    align-content: stretch !important;
+    justify-content: stretch !important;
+}
+
+/* Her bir kamera kutusunun (tile / video-wrapper) hücreyi %100 doldurması için */
+#videoGrid .video-tile,
+#videoGrid .video-wrapper,
+#videoGrid > div:not(#spotlightFilmstrip):not(#noActiveCameraNotice) {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    aspect-ratio: auto !important; /* 4/3 zorlamasını kaldırır, boşlukları yok eder */
+    margin: 0 !important;
+    border-radius: 0px !important;
+    background-color: #2b2d31;
+    /* Kutular birbirine sıfır olduğu için sadece çok ince ayırıcı çizgi */
+    border: 0.5px solid rgba(255, 255, 255, 0.05);
+    box-shadow: none !important;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: none;
+}
+
+/* Kamera videolarının kutu içinde siyah boşluk bırakmadan tam kaplaması için */
+#videoGrid:not(.spotlight-layout) .video-wrapper video,
+#videoGrid:not(.spotlight-layout) > div video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+}
+
+/* 12+ kişide tüm kameralar kapalıysa veya kompakt moddaysa avatarları küçült */
+#videoGrid.compact-grid .avatar-container,
+#videoGrid.compact-grid .avatar-container > div,
+#videoGrid.compact-grid img.participant-avatar {
+    width: 42px !important;
+    height: 42px !important;
+}
+
+#videoGrid.compact-grid .participant-name {
+    font-size: 11px !important;
+    padding: 2px 6px !important;
+}
+
+/* 20+ kişide (6x5 ve üstü) dahi boşlukları 0 tut */
+#videoGrid.ultra-compact-grid {
+    gap: 0px !important;
+    padding: 0px !important;
+}
+
+/* Kamerası olmayanları gizleme sınıfı */
+.hidden-no-camera {
+    display: none !important;
+}
+
+/* Eski JS'den gelen .spotlight-active desteği (Eğer aktifse sıfır boşluklu çalışır) */
+#spotlightMain .video-wrapper {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0px !important;
+    border: none !important;
+    aspect-ratio: auto !important;
+}
+
+#videoGrid.spotlight-active { 
+    display: flex !important;
+    flex: 0 0 135px !important; 
+    height: 135px !important; 
+    flex-wrap: nowrap !important; 
+    overflow-x: auto !important; 
+    overflow-y: hidden !important; 
+    align-items: stretch !important; 
+    justify-content: flex-start !important; 
+    padding: 0px !important; 
+    gap: 0px !important;
+}
+
+#videoGrid.spotlight-active .video-wrapper { 
+    flex: 0 0 180px !important; 
+    width: 180px !important;
+    height: 100% !important; 
+    min-width: 180px !important; 
+    border-radius: 0px !important;
+    cursor: pointer; 
+    opacity: 1 !important; 
+    filter: none !important;
+    border: 0.5px solid rgba(255, 255, 255, 0.1);
+}
+
+/* POP-UP (YÜZEN VİDEO PENCERESİ) MODU */
+#videoArea.floating-popup {
+    position: fixed !important;
+    bottom: 92px;
+    right: 16px;
+    width: 340px;
+    height: 260px;
+    z-index: 90;
+    background-color: rgba(30, 31, 34, 0.96);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.65);
+    padding: 0px !important;
+    overflow: hidden;
+    display: flex !important;
+    flex-direction: column;
+    transition: none !important;
+}
+
+@media (max-width: 640px) {
+    #videoArea.floating-popup {
+        width: 240px;
+        height: 195px;
+        bottom: 84px;
+        right: 12px;
+    }
+}
+
+#videoArea.floating-popup #popupDragHeader { display: flex !important; }
+#videoArea.floating-popup .video-grid { gap: 0px !important; padding: 0px !important; }
+#videoArea.floating-popup .video-wrapper { border-radius: 0px !important; }
+#videoArea.floating-popup .avatar-container > div { width: 3rem; height: 3rem; border-width: 2px; }
+
+.chat-image-attachment {
+    max-height: 240px;
+    border-radius: 8px;
+    margin-top: 8px;
+    object-fit: cover;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.chat-image-attachment:hover { opacity: 0.85; }
+
+@keyframes flashHighlight {
+    0% { background-color: rgba(88, 101, 242, 0.55); }
+    100% { background-color: transparent; }
+}
+.msg-highlight { animation: flashHighlight 1.8s ease-out; }

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="tr" class="h-full antialiased">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"/>
+    <title>MeetingChallenge</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'mc-bg': '#1e1f22',
+                        'mc-sidebar': '#2b2d31',
+                        'mc-hover': '#35373c',
+                        'mc-active': '#404249',
+                        'mc-primary': '#5865F2',
+                        'mc-green': '#23a559',
+                        'mc-red': '#f23f42'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Harici Stil Dosyası -->
+    <link rel="stylesheet" href="css/style.css" />
+
+    <!-- LIVEKIT SDK (v1.15.4) -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client@1.15.4/dist/livekit-client.umd.min.js"></script>
+
+    <!-- MICROSOFT SIGNALR SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+</head>
+<body class="h-full w-full flex flex-col overflow-hidden bg-mc-bg text-gray-200 font-sans selection:bg-mc-primary selection:text-white" onclick="handleGlobalBodyClick(event)">
+
+    <!-- GİZLİ SES KONTEYNERİ -->
+    <div id="audioContainer" class="hidden"></div>
+
+    <!-- SAĞ TIK KİŞİSEL SES SEVİYESİ POPOVER MENÜSÜ (VARSAYILAN %100, MAX %200 BOOST) -->
+    <div id="userVolumeContextMenu"
+         onclick="event.stopPropagation()"
+         onmouseenter="clearVolumeMenuCloseTimer()"
+         onmouseleave="scheduleVolumeMenuClose()"
+         class="hidden fixed z-[250] bg-[#232428] border border-white/15 rounded-xl shadow-2xl p-3.5 w-60 select-none">
+        <div class="flex items-center justify-between mb-2">
+            <span id="volContextMenuUser" class="text-xs font-bold text-white truncate max-w-[140px]">@kullanici</span>
+            <span id="volContextMenuValue" class="text-[11px] font-bold text-mc-primary bg-mc-primary/15 px-2 py-0.5 rounded-md">100%</span>
+        </div>
+        <div class="flex items-center gap-2.5">
+            <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+            </svg>
+            <input type="range" id="volContextMenuSlider" min="5" max="200" step="1" value="100" oninput="handleContextMenuVolumeInput(this.value, event)" class="w-full h-1.5 bg-[#1e1f22] rounded-lg appearance-none cursor-pointer accent-mc-primary">
+        </div>
+    </div>
+
+    <!-- GİRİŞ EKRANI -->
+    <div id="loginScreen" class="hidden flex flex-col items-center justify-center h-full w-full p-6 bg-mc-bg z-50 absolute inset-0">
+        <div class="bg-mc-sidebar p-8 rounded-2xl w-full max-w-md shadow-2xl border border-white/5">
+            <h1 class="text-2xl font-bold text-center text-white mb-6">MeetingChallenge</h1>
+            <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Kullanıcı Adı</label>
+                    <input type="text" id="usernameInput" required class="w-full bg-[#1e1f22] rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-mc-primary">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Şifre</label>
+                    <input type="password" id="passwordInput" required class="w-full bg-[#1e1f22] rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-mc-primary">
+                </div>
+                <div id="loginError" class="hidden text-mc-red text-sm text-center font-medium"></div>
+                <button type="submit" id="loginBtn" class="w-full bg-mc-primary hover:bg-[#4752C4] text-white font-medium py-2.5 rounded-lg transition-colors mt-2 shadow-lg">Giriş Yap</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ANA UYGULAMA EKRANI -->
+    <div id="appScreen" class="hidden flex h-full w-full overflow-hidden relative">
+        
+        <!-- MOBİL ARKA PLAN KARARTMASI -->
+        <div id="mobileBackdrop" onclick="closeMobileDrawers()" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden backdrop-blur-sm transition-opacity"></div>
+
+        <!-- SOL KANAL MENÜSÜ -->
+        <div id="channelSidebar" class="fixed md:static inset-y-0 left-0 w-[280px] h-full min-h-0 bg-mc-sidebar flex flex-col shrink-0 border-r border-black/20 z-40 transition-all duration-300 -translate-x-full md:translate-x-0">
+            <div class="border-b border-black/20 flex flex-col px-4 py-5 shrink-0 shadow-sm items-center justify-center relative">
+                <img src="https://meetingchallenge.com/images/logo_white.png" onerror="this.src='https://meetingchallenge.com/_next/image?url=%2Fimages%2Flogo_white.png&w=640&q=75'" alt="MeetingChallenge" class="h-16 object-contain">
+                
+                <div class="flex items-center gap-4 mr-4">
+                    <!-- Kurallar / Normlar -->
+                    <button onclick="openNormsModal()" class="text-gray-400 hover:text-white transition-colors cursor-pointer" title="Topluluk Kuralları">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                    
+                    <!-- Etkinlikler -->
+                    <button onclick="openEventsModal()" class="text-gray-400 hover:text-white transition-colors cursor-pointer" title="Etkinlikler">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    </button>
+                    
+                    <!-- DM (Özel Mesajlar) -->
+                    <button onclick="openDMsModal()" class="text-gray-400 hover:text-white transition-colors cursor-pointer" title="Direkt Mesajlar">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                    </button>
+                    
+                    <!-- Bildirimler -->
+                    <button onclick="openNotificationsModal()" class="relative transition-colors cursor-pointer" title="Bildirimler">
+                        <svg id="notificationIcon" class="w-5 h-5 text-gray-400 hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                        <span id="notificationBadge" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-mc-red rounded-full border-[1.5px] border-[#313338]"></span>
+                    </button>
+                </div>
+
+                <button onclick="toggleChannelSidebar()" class="absolute top-2 right-2 text-gray-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Menüyü Kapat">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+                </button>
+            </div>
+
+            <!-- Kanalların Listelendiği Yer -->
+            <div id="sidebarChannels" class="flex-1 min-h-0 overflow-y-auto py-3 space-y-1 custom-scrollbar"></div>
+
+            <!-- KULLANICI ALT BİLGİ BARI -->
+            <div class="h-[60px] bg-[#232428] flex items-center px-3 shrink-0 gap-2 border-t border-white/5">
+                <div id="mySidebarAvatarBox" onclick="openMyProfile()" class="w-9 h-9 rounded-full bg-[#1e1f22] flex items-center justify-center relative shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="Profilimi Gör">
+                    <img id="mySidebarAvatarImg" src="https://ui-avatars.com/api/?background=1e1f22&color=fff&name=Me" class="w-full h-full rounded-full object-cover border border-white/10">
+                    <div id="connectionDot" class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-gray-500 border-[2px] border-[#232428]"></div>
+                </div>
+                <div class="flex-1 min-w-0 cursor-pointer hover:bg-white/5 rounded px-1.5 py-1 transition-colors" onclick="openMyProfile()" title="Profilimi Gör">
+                    <div class="text-sm font-bold text-white truncate hover:underline" id="localUserName">Yükleniyor...</div>
+                    <div id="localStatusText" onclick="event.stopPropagation(); goToActiveVoiceChannel();" class="text-[11px] text-gray-400 truncate transition-colors">Bağlı değil</div>
+                </div>
+                <button class="shrink-0 text-gray-400 hover:text-mc-red hover:bg-white/5 p-2 rounded-lg transition-colors cursor-pointer" onclick="showLogoutModal()" title="Çıkış Yap">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- ORTA VE SAĞ ALAN -->
+        <div class="flex-1 flex flex-col relative bg-mc-bg overflow-hidden min-w-0">
+            <!-- ÜST BAR -->
+            <div class="h-12 border-b border-white/5 bg-mc-bg flex items-center px-3 md:px-4 shrink-0 gap-2 z-20 justify-between shadow-sm">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <button id="sidebarToggleBtn" onclick="toggleChannelSidebar()" class="md:hidden text-gray-300 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5 shrink-0">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                    </button>
+                    <button id="topBackChannelBtn" onclick="goBackChannel()" class="hidden inline-flex items-center gap-1 bg-[#2b2d31] hover:bg-[#35373c] text-gray-200 hover:text-white px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors shrink-0">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+                        <span>Geri</span>
+                    </button>
+                    <div id="activeRoomNameTop" class="flex items-center gap-2 truncate shrink-0 max-w-[55%] sm:max-w-[45%]">
+                        <span class="font-semibold text-white truncate">Lobi</span>
+                    </div>
+                    <div id="topActiveSpeakersBadge" class="hidden inline-flex items-center gap-1.5 bg-mc-green/15 text-mc-green px-2.5 py-0.5 rounded-full text-xs font-medium truncate">
+                        <span class="w-2 h-2 rounded-full bg-mc-green animate-ping shrink-0"></span>
+                        <span id="topActiveSpeakersText" class="truncate"></span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button id="popupToggleBtnTop" onclick="toggleVideoPopupMode()" class="hidden text-gray-300 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Görüntüyü Pop-up Yap / Sabitle">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    </button>
+                    <button id="chatToggleBtnTop" onclick="toggleChatSidebar()" class="hidden text-gray-300 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5 relative" title="Sohbeti Aç/Kapat">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- BOŞ DURUM (LOBİ) -->
+            <div id="emptyState" class="flex-1 flex flex-col items-center justify-center text-gray-500 p-6 text-center">
+                <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                <h2 class="text-lg font-medium text-white">Bir Kanala Katılın</h2>
+                <p class="text-sm mt-1 max-w-xs">Sol menüden sesli veya yazılı bir kanala tıklayarak sohbete başlayın.</p>
+                <button onclick="toggleChannelSidebar()" class="mt-4 md:hidden bg-mc-primary text-white px-4 py-2 rounded-lg text-sm font-medium shadow">Kanalları Gör</button>
+            </div>
+
+            <!-- ANA İÇERİK ALANI -->
+            <div id="mainContentArea" class="hidden flex-1 overflow-hidden relative flex flex-row min-h-0">
+                <!-- VİDEO ALANI -->
+                <div id="videoArea" class="flex-1 overflow-hidden p-0 relative transition-all duration-300 flex flex-col min-w-0 min-h-0">
+                    <div id="popupDragHeader" class="hidden items-center justify-between px-2.5 py-1.5 bg-[#232428] rounded-t-xl cursor-move select-none mb-1 border-b border-white/10 shrink-0">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                            <span class="w-2 h-2 rounded-full bg-mc-green animate-pulse shrink-0"></span>
+                            <span id="popupHeaderTitle" class="text-xs font-bold text-white truncate">Ses Kanalı</span>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <button onclick="goToActiveVoiceChannel()" class="text-gray-400 hover:text-white p-1 rounded hover:bg-white/10" title="Tam Ekran Kanal Görünümüne Dön">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="spotlightMain" class="hidden flex-1 min-h-0 mb-2 relative rounded-xl overflow-hidden shadow-lg bg-[#1e1f22] border border-white/5 items-center justify-center"></div>
+                    <div id="videoGrid" class="video-grid flex-1"></div>
+                </div>
+
+                <!-- SOHBET ALANI -->
+                <div id="chatSidebar" class="hidden flex flex-col bg-[#313338] border-l border-white/5 transition-all duration-300 relative z-30">
+                    <div id="mobileChatHeader" class="hidden md:hidden flex h-11 px-4 bg-[#2b2d31] border-b border-white/5 items-center justify-between shrink-0">
+                        <span class="font-bold text-sm text-white">Kanal Sohbeti</span>
+                        <button onclick="toggleChatSidebar()" class="text-gray-400 hover:text-white p-1">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div id="olderMessagesLoader" class="hidden text-center py-2 text-xs text-indigo-400 bg-[#2b2d31]/60 animate-pulse shrink-0">
+                        Eski mesajlar yükleniyor...
+                    </div>
+                    <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-1.5 relative scroll-smooth min-h-0">
+                        <div class="text-center text-gray-500 text-sm mt-10 animate-pulse">Mesajlar yükleniyor...</div>
+                    </div>
+                    <button id="scrollToBottomBtn" onclick="scrollToBottomChat(true)" class="hidden absolute bottom-24 right-5 bg-mc-primary hover:bg-[#4752C4] text-white px-3.5 py-2 rounded-full shadow-2xl transition-all z-30 flex items-center gap-1.5 text-xs font-semibold">
+                        <span id="unreadBadgeText">En sona git</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7-7-7m14-6l-7 7-7-7"></path></svg>
+                    </button>
+                    <div id="replyPreviewBar" class="hidden px-4 pt-2 bg-[#313338] shrink-0">
+                        <div class="flex items-center justify-between bg-[#232428] border-l-4 border-mc-primary px-3 py-2 rounded-r-xl text-xs">
+                            <div class="truncate pr-2 flex items-center gap-1.5 min-w-0">
+                                <span class="text-gray-400 shrink-0">Yanıtlanıyor:</span>
+                                <span id="replyPreviewUser" class="font-bold text-indigo-400 shrink-0">@kullanici</span>
+                                <span id="replyPreviewText" class="text-gray-300 truncate"></span>
+                            </div>
+                            <button type="button" onclick="cancelReply()" class="text-gray-400 hover:text-white font-bold px-1.5" title="İptal">✕</button>
+                        </div>
+                    </div>
+                    <div id="filePreviewBar" class="hidden px-4 pt-2 bg-[#313338] shrink-0">
+                        <div class="relative bg-[#232428] border border-white/10 p-2 rounded-xl flex items-center gap-3 max-w-xs">
+                            <img id="filePreviewImg" src="" class="hidden w-12 h-12 rounded-lg object-cover border border-white/10">
+                            <span id="filePreviewIcon" class="text-2xl hidden">📄</span>
+                            <div class="min-w-0 flex-1">
+                                <p id="filePreviewName" class="text-xs font-medium text-white truncate"></p>
+                                <p id="filePreviewSize" class="text-[10px] text-gray-400"></p>
+                            </div>
+                            <button type="button" onclick="clearSelectedFile()" class="text-gray-400 hover:text-mc-red p-1 text-xs font-bold" title="Kaldır">✕</button>
+                        </div>
+                    </div>
+
+                    <div class="px-4 pb-4 pt-2 bg-[#313338] shrink-0 border-t border-white/5 relative">
+                        <div id="mentionPopup" class="hidden absolute bottom-16 left-4 bg-[#232428] border border-white/10 rounded-xl shadow-2xl z-40 w-64 overflow-hidden">
+                            <div id="mentionPopupHeader" class="text-[10px] font-bold text-gray-400 uppercase px-3 py-1.5 border-b border-white/5">Kullanıcı Etiketle</div>
+                            <div id="mentionList" class="max-h-48 overflow-y-auto"></div>
+                        </div>
+
+                        <!-- Metin İçi Kategorili Emoji Seçici Menüsü -->
+                        <div id="inputEmojiPicker" class="emoji-picker-popover hidden absolute bottom-16 right-4 bg-[#232428] border border-white/10 p-3 rounded-2xl shadow-2xl z-40 w-72" onclick="event.stopPropagation()">
+                            <div id="inputEmojiGrid" class="max-h-60 overflow-y-auto pr-1"></div>
+                        </div>
+
+                        <form id="chatForm" onsubmit="handleSendMessage(event)" class="flex items-end gap-2 bg-[#232428] rounded-xl p-2 focus-within:ring-1 focus-within:ring-mc-primary transition-all">
+                            <button type="button" onclick="document.getElementById('chatFileInput').click()" class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors shrink-0" title="Dosya Ekle">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg>
+                            </button>
+                            <input type="file" id="chatFileInput" onchange="handleFileSelect(event)" class="hidden" accept="image/*,video/*,.pdf,.doc,.docx">
+                            <textarea id="chatInput" rows="1" placeholder="Mesajınızı yazın..." oninput="handleChatInput(event)" onkeydown="handleChatKeyDown(event)" class="flex-1 bg-transparent text-white placeholder-gray-400 resize-none focus:outline-none text-sm py-2 leading-5" style="max-height:200px"></textarea>
+                            <div class="relative">
+                                <button type="button" onclick="toggleInputEmojiPicker(event)" class="emoji-trigger-btn p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors shrink-0" title="Emoji Ekle">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" x2="9.01" y1="9" y2="9"></line><line x1="15" x2="15.01" y1="9" y2="9"></line></svg>
+                                </button>
+                            </div>
+                            <button type="submit" id="sendBtn" disabled class="p-2 rounded-lg bg-mc-primary text-white hover:bg-[#4752C4] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0" title="Gönder">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ALT KONTROL BARI -->
+            <div id="controlBar" class="hidden flex h-16 md:h-20 bg-[#18191c] border-t border-white/5 shrink-0 items-center justify-between px-3 md:px-6 z-20 relative">                
+                
+                <!-- CİHAZ SEÇİM, KAMERA GİZLEME VE BAĞLANTI BİLGİLERİ POPOVER MODALI (BAŞLIK SABİTLENDİ) -->
+                <div id="deviceSettingsModal" onclick="event.stopPropagation()" class="hidden absolute bottom-20 left-1/2 -translate-x-1/2 bg-[#232428] border border-white/10 rounded-2xl shadow-2xl w-[92vw] max-w-sm max-h-[78vh] z-50 flex flex-col overflow-hidden">
+                    
+                    <!-- Sabit Üst Başlık (Kaymaz) -->
+                    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-[#1e1f22]/60 shrink-0">
+                        <h4 class="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 min-w-0 truncate">
+                            <span class="shrink-0">⚙️</span>
+                            <span class="truncate">Ses ve Görüntü Ayarları</span>
+                        </h4>
+                        <button type="button" onclick="closeDeviceModal()" class="text-gray-400 hover:text-white text-xs w-6 h-6 flex items-center justify-center rounded-lg hover:bg-white/10 shrink-0 cursor-pointer">✕</button>
+                    </div>
+
+                    <!-- Kaydırılabilir İçerik Gövdesi -->
+                    <div id="deviceSettingsBody" class="p-4 space-y-3.5 overflow-y-auto flex-1 custom-scrollbar">
+                        <div>
+                            <label class="block text-[11px] font-bold text-gray-400 uppercase mb-1">🎙️ Mikrofon</label>
+                            <select id="selectMicDevice" onchange="handleMicDeviceChange(this.value)" class="w-full bg-[#1e1f22] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-mc-primary"></select>
+                        </div>
+
+                        <div>
+                            <label class="block text-[11px] font-bold text-gray-400 uppercase mb-1">📷 Kamera</label>
+                            <select id="selectCamDevice" onchange="handleCamDeviceChange(this.value)" class="w-full bg-[#1e1f22] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-mc-primary"></select>
+                        </div>
+
+                        <div>
+                            <label class="block text-[11px] font-bold text-gray-400 uppercase mb-1">🔊 Ses Çıkışı (Hoparlör / Kulaklık)</label>
+                            <select id="selectSpeakerDevice" onchange="handleSpeakerDeviceChange(this.value)" class="w-full bg-[#1e1f22] border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-mc-primary"></select>
+                        </div>
+
+                        <!-- Geriye dönük uyumluluk için gizli checkbox (media.js referans verirse hata vermemesi için) -->
+                        <input type="checkbox" id="toggleHideCamerasCheckbox" onchange="toggleHideAllCamerasMode()" class="hidden">
+
+                        <!-- Birleştirilmiş Kamera & Bağlantı Ayarları Grubu -->
+                        <div id="unifiedCameraSettingsGroup" class="flex flex-col gap-2.5 pt-3 border-t border-white/10">
+                            <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-0.5">Kamera & Bağlantı Ayarları</div>
+
+                            <!-- 1. Tüm Kameraları Gizle -->
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-[#2b2d31] hover:bg-[#313338] transition-colors border border-white/5">
+                                <div class="flex items-center gap-2.5 pr-2 min-w-0">
+                                    <div class="p-2 rounded-lg bg-mc-primary/15 text-mc-primary shrink-0">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                            <line x1="3" y1="3" x2="21" y2="21" stroke-width="2"></line>
+                                        </svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-bold text-white">Tüm Kameraları Gizle</div>
+                                        <div class="text-[11px] text-gray-400 leading-snug">Kamera yayınlarını kapatıp sadece profil kartlarını göster</div>
+                                    </div>
+                                </div>
+                                <button type="button" id="btnToggleHideAllCamsSettings" onclick="toggleHideAllCamerasMode()"
+                                    class="w-11 h-6 rounded-full transition-colors duration-200 relative flex items-center shrink-0 cursor-pointer bg-[#1e1f22] border border-white/10">
+                                    <span id="knobHideAllCamsSettings" class="w-4 h-4 rounded-full bg-white shadow-md transform transition-transform duration-200 translate-x-0.5"></span>
+                                </button>
+                            </div>
+
+                            <!-- 2. Kamerası Olmayanları Gizle -->
+                            <div class="flex items-center justify-between p-3 rounded-xl bg-[#2b2d31] hover:bg-[#313338] transition-colors border border-white/5">
+                                <div class="flex items-center gap-2.5 pr-2 min-w-0">
+                                    <div class="p-2 rounded-lg bg-mc-primary/15 text-mc-primary shrink-0">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                                        </svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-bold text-white">Kamerası Olmayanları Gizle</div>
+                                        <div class="text-[11px] text-gray-400 leading-snug">Ekranda yalnızca kamerası açık olan kullanıcıları göster</div>
+                                    </div>
+                                </div>
+                                <button type="button" id="btnToggleHideNoCamSettings" onclick="toggleHideNonVideoParticipants()"
+                                    class="w-11 h-6 rounded-full transition-colors duration-200 relative flex items-center shrink-0 cursor-pointer bg-[#1e1f22] border border-white/10">
+                                    <span id="knobHideNoCamSettings" class="w-4 h-4 rounded-full bg-white shadow-md transform transition-transform duration-200 translate-x-0.5"></span>
+                                </button>
+                            </div>
+
+                            <!-- 3. Bağlantı Durumu ve Sunucu Bilgisi -->
+                            <div class="flex flex-col rounded-xl bg-[#2b2d31] border border-white/5 overflow-hidden">
+                                <button type="button" onclick="toggleConnectionDiagnosticsPanel()"
+                                    class="w-full flex items-center justify-between p-3 hover:bg-[#313338] transition-colors cursor-pointer text-left">
+                                    <div class="flex items-center gap-2.5 pr-2 min-w-0">
+                                        <div class="p-2 rounded-lg bg-mc-green/15 text-mc-green shrink-0">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                            </svg>
+                                        </div>
+                                        <div class="min-w-0">
+                                            <div class="text-xs font-bold text-white">Bağlantı Durumu & Sunucu Bilgisi</div>
+                                            <div class="text-[11px] text-gray-400 leading-snug">Ping, paket kaybı, jitter, bitrate ve sunucu detayları</div>
+                                        </div>
+                                    </div>
+                                    <svg id="mcDiagnosticsChevron" class="w-4 h-4 text-gray-400 transition-transform duration-200 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </button>
+
+                                <div id="mcDiagnosticsCollapsiblePanel" class="hidden px-3 pb-3 pt-2 border-t border-white/5 bg-[#1e1f22]/70 flex flex-col gap-2">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Canlı Ağ & RTC Telemetrisi</span>
+                                        <span id="diagOverallStatusBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-mc-green/20 text-mc-green border-mc-green/30">Kontrol Ediliyor...</span>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-1.5 text-xs">
+                                        <div class="bg-[#111214] p-2 rounded-lg border border-white/5">
+                                            <div class="text-[10px] text-gray-400 font-semibold">Gecikme (Ping / RTT)</div>
+                                            <div id="diagRttValue" class="text-xs font-bold text-white mt-0.5">-- ms</div>
+                                        </div>
+                                        <div class="bg-[#111214] p-2 rounded-lg border border-white/5">
+                                            <div class="text-[10px] text-gray-400 font-semibold">Paket Kaybı (Loss)</div>
+                                            <div id="diagPacketLossValue" class="text-xs font-bold text-white mt-0.5">%0.0</div>
+                                        </div>
+                                        <div class="bg-[#111214] p-2 rounded-lg border border-white/5">
+                                            <div class="text-[10px] text-gray-400 font-semibold">Titreşim (Jitter)</div>
+                                            <div id="diagJitterValue" class="text-xs font-bold text-gray-200 mt-0.5">0 ms</div>
+                                        </div>
+                                        <div class="bg-[#111214] p-2 rounded-lg border border-white/5">
+                                            <div class="text-[10px] text-gray-400 font-semibold">Anlık Veri (Bitrate)</div>
+                                            <div id="diagBitrateValue" class="text-[11px] font-bold text-gray-200 mt-0.5 truncate">↑ 0 / ↓ 0 kbps</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="bg-[#111214] p-2.5 rounded-lg border border-white/5 flex flex-col gap-1 text-[11px]">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-gray-400 font-medium shrink-0">Sunucu:</span>
+                                            <span id="diagServerInfoValue" class="text-gray-200 font-semibold truncate">API: api.meetingchallenge.com</span>
+                                        </div>
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-gray-400 font-medium shrink-0">Protokol & Codec:</span>
+                                            <span id="diagCodecProtocolValue" class="text-indigo-300 font-semibold truncate">UDP • OPUS / VP8</span>
+                                        </div>
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="text-gray-400 font-medium shrink-0">Mesajlaşma (Hub):</span>
+                                            <span id="diagSignalRStatusValue" class="text-mc-green font-semibold truncate">Aktif</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 min-w-0 max-w-[30%]">
+                    <div onclick="goToActiveVoiceChannel()" class="cursor-pointer text-xs text-mc-green font-bold flex items-center gap-1.5 bg-mc-green/10 hover:bg-mc-green/20 px-2.5 py-1.5 rounded-lg transition-colors truncate">
+                        <span class="relative flex h-2 w-2 shrink-0"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-mc-green opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-mc-green"></span></span>
+                        <span id="controlBarChannelName" class="truncate hidden sm:inline">Ses Aktif</span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-center gap-2.5 md:gap-4">
+                    <!-- Mikrofon Aç/Kapat -->
+                    <button id="btnMic" onclick="toggleMic()" class="w-11 h-11 md:w-12 md:h-12 rounded-full bg-mc-sidebar hover:bg-mc-hover flex items-center justify-center text-white transition-all shadow-md" title="Mikrofonu Aç/Kapat">
+                        <svg id="iconMicOn" class="hidden w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+                        <svg id="iconMicOff" class="w-5 h-5 text-mc-red" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+                    </button>
+
+                    <!-- Kamera Aç/Kapat -->
+                    <button id="btnCam" onclick="toggleCam()" class="w-11 h-11 md:w-12 md:h-12 rounded-full bg-mc-sidebar hover:bg-mc-hover flex items-center justify-center text-white transition-all shadow-md" title="Kamerayı Aç/Kapat">
+                        <svg id="iconCamOn" class="hidden w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                        <svg id="iconCamOff" class="w-5 h-5 text-mc-red" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21.17 15.17l-1.92-1.92A1 1 0 0 0 18 14v-4a1 1 0 0 0-1.25-.97l-3.32-3.32a3 3 0 0 0-4.24 0l-.82.82"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    </button>
+
+                    <!-- Cihaz Ayarları -->
+                    <button id="btnDeviceSettings" onclick="toggleDeviceModal(event)" class="w-11 h-11 md:w-12 md:h-12 rounded-full bg-mc-sidebar hover:bg-mc-hover flex items-center justify-center text-white transition-all shadow-md" title="Kamera, Mikrofon ve Ses Çıkışı Seç">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </button>
+
+                    <!-- Pop-up Modu -->
+                    <button id="btnPopupBottom" onclick="toggleVideoPopupMode()" class="w-11 h-11 md:w-12 md:h-12 rounded-full bg-mc-sidebar hover:bg-mc-hover flex items-center justify-center text-white transition-all shadow-md" title="Tüm Görüntüleri Pop-up Olarak Çıkart">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M13 13h6v6h-6z"/></svg>
+                    </button>
+
+                    <!-- Ayrıl -->
+                    <button onclick="leaveRoom()" class="px-4 md:px-6 h-11 md:h-12 rounded-full bg-mc-red hover:bg-[#d93a3d] text-white font-medium flex items-center gap-2 transition-all shadow-md text-sm">
+                        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="2" y2="22"/></svg>
+                        <span class="hidden sm:inline">Ayrıl</span>
+                    </button>
+                </div>
+
+                <div class="w-6 sm:w-[15%] flex justify-end"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- POST VE RESİM GÖRÜNTÜLEYİCİ MODAL -->
+    <div id="imageViewerModal" class="hidden fixed inset-0 z-[150] bg-black/90 backdrop-blur-sm flex flex-col md:flex-row transition-opacity cursor-pointer" onclick="closeImageViewer()">
+        <button onclick="closeImageViewer()" class="absolute top-4 right-4 md:right-auto md:left-4 z-[160] p-2 text-gray-300 hover:text-white bg-black/50 hover:bg-black/80 rounded-full transition-all">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+        <div class="flex-1 relative flex items-center justify-center p-4 md:p-8 overflow-hidden min-h-0">
+            <button onclick="prevImage(event)" id="viewerPrevBtn" class="absolute left-2 md:left-8 z-[160] p-3 text-white bg-black/50 hover:bg-black/80 rounded-full backdrop-blur transition-all hidden border border-white/10">
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path></svg>
+            </button>
+            <img id="viewerImage" src="" class="hidden max-h-full max-w-full object-contain drop-shadow-2xl transition-transform duration-300 cursor-default" onclick="event.stopPropagation()">
+            <div id="viewerTextOnly" class="hidden w-full max-w-lg bg-[#2b2d31] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl text-center overflow-y-auto max-h-[70vh] cursor-default" onclick="event.stopPropagation()">
+                <p id="viewerTextOnlyContent" class="text-base md:text-xl font-medium text-gray-100 leading-relaxed break-words whitespace-pre-wrap"></p>
+            </div>
+            <button onclick="nextImage(event)" id="viewerNextBtn" class="absolute right-2 md:right-8 z-[160] p-3 text-white bg-black/50 hover:bg-black/80 rounded-full backdrop-blur transition-all hidden border border-white/10">
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+            </button>
+        </div>
+        <div class="w-full md:w-[350px] bg-[#2b2d31] md:border-l border-t md:border-t-0 border-white/10 flex flex-col shrink-0 overflow-y-auto max-h-[45vh] md:max-h-full justify-between cursor-default" onclick="event.stopPropagation()">
+            <div>
+                <div class="p-4 md:p-5 border-b border-white/10 flex items-center gap-3 bg-[#232428]">
+                    <img id="viewerUserAvatar" src="" class="w-10 h-10 rounded-full bg-gray-700 object-cover border border-white/10 cursor-pointer hover:opacity-80" onclick="openViewerUserProfile()">
+                    <div>
+                        <div id="viewerUserName" onclick="openViewerUserProfile()" class="font-bold text-gray-100 text-[15px] cursor-pointer hover:underline"></div>
+                        <div id="viewerTime" class="text-[12px] text-gray-400 mt-0.5"></div>
+                    </div>
+                </div>
+                <div id="viewerBodySection" class="p-4 md:p-5 space-y-3">
+                    <div id="viewerContent" class="text-gray-200 text-[14px] whitespace-pre-wrap leading-relaxed empty:hidden"></div>
+                    <div id="viewerExistingReactions" class="flex flex-wrap gap-1.5 empty:hidden"></div>
+                </div>
+            </div>
+            <div id="viewerReactionBar" class="p-3.5 bg-[#232428] border-t border-white/10 flex flex-wrap gap-1.5 justify-center"></div>
+        </div>
+    </div>
+
+    <!-- EMOJİLER (SADECE EKLENEN EMOJİLERİ VE KULLANICILARI GÖSTEREN MODAL) -->
+    <div id="reactionDetailsModal" class="hidden fixed inset-0 bg-black/75 z-[190] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity cursor-pointer" onclick="closeReactionDetailsModal()">
+        <div class="bg-[#2b2d31] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh] cursor-default" onclick="event.stopPropagation()">
+            <div class="p-4 border-b border-white/10 flex items-center justify-between bg-[#232428] shrink-0">
+                <h3 class="text-white font-bold text-base flex items-center gap-2">
+                    <span>💙</span> Emojiler
+                </h3>
+                <button type="button" onclick="closeReactionDetailsModal()" class="text-gray-400 hover:text-white w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center transition-colors">✕</button>
+            </div>
+
+            <!-- Sadece Eklenen Emojilerin Sekmeleri -->
+            <div id="reactionModalTabs" class="flex items-center gap-1.5 px-4 py-2.5 bg-[#232428]/70 border-b border-white/5 overflow-x-auto shrink-0"></div>
+
+            <!-- Tepki Bırakan Kullanıcılar Listesi -->
+            <div id="reactionModalUsersList" class="p-3 overflow-y-auto space-y-1.5 flex-1 min-h-[180px]"></div>
+        </div>
+    </div>
+
+    <!-- ALT BAŞLIK (THREAD) OLUŞTURMA MODALI -->
+    <div id="createThreadModal" class="hidden fixed inset-0 bg-black/75 z-[180] flex items-center justify-center p-4 backdrop-blur-sm" onclick="closeCreateThreadModal()">
+        <div class="bg-mc-sidebar border border-white/10 p-6 rounded-2xl shadow-2xl w-full max-w-md" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2"><span>🧵</span> Alt Başlık Aç</h3>
+                <button onclick="closeCreateThreadModal()" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10">✕</button>
+            </div>
+            <form onsubmit="submitCreateThread(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Alt Başlık Adı</label>
+                    <input type="text" id="threadTitleInput" required placeholder="Örn: Etkinlik Detayları" class="w-full bg-[#1e1f22] border border-white/10 rounded-lg px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-mc-primary">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">İlk Mesaj</label>
+                    <textarea id="threadContentInput" rows="3" required placeholder="Alt başlık için ilk mesajı yazın..." class="w-full bg-[#1e1f22] border border-white/10 rounded-lg px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-mc-primary resize-none"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeCreateThreadModal()" class="px-4 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-white/5 text-sm font-medium">İptal</button>
+                    <button type="submit" id="createThreadSubmitBtn" class="px-5 py-2 bg-mc-primary hover:bg-[#4752C4] rounded-lg text-white text-sm font-semibold shadow-lg">Oluştur</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- KULLANICI PROFİLİ MODALI -->
+    <div id="userProfileModal" class="hidden fixed inset-0 bg-black/75 z-[210] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity cursor-pointer" onclick="closeUserProfileModal()">
+        <div class="bg-[#18191c] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative cursor-default" onclick="event.stopPropagation()">
+            <button onclick="closeUserProfileModal()" class="absolute top-4 right-4 bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors z-10">✕</button>
+            <div class="p-6 max-h-[85vh] overflow-y-auto space-y-4">
+                <div class="flex items-center gap-4">
+                    <div class="relative inline-block group cursor-pointer shrink-0" onclick="openAvatarZoomModal()" title="Resmi Büyüt">
+                        <img id="profileModalAvatar" src="" class="w-20 h-20 rounded-full border-2 border-white/10 bg-[#2b2d31] object-cover shadow-lg">
+                        <div class="absolute inset-0 rounded-full bg-black/55 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16zM11 8v6M8 11h6"/></svg>
+                        </div>
+                        <div class="absolute bottom-0.5 right-0.5 w-4 h-4 rounded-full bg-mc-green border-2 border-[#18191c]"></div>
+                    </div>
+                    <div class="min-w-0 pr-6">
+                        <h3 id="profileModalFullName" class="text-lg font-bold text-white leading-tight truncate">Kullanıcı</h3>
+                        <p id="profileModalUsername" class="text-xs text-gray-400 font-medium mt-0.5 truncate">@kullanici</p>
+                    </div>
+                </div>
+                <div id="profileModalLoader" class="hidden py-3 text-center text-xs text-indigo-400 animate-pulse">Kullanıcı bilgileri yükleniyor...</div>
+                <div id="profileModalDetailsSection" class="bg-[#232428] rounded-xl p-4 space-y-3.5 border border-white/5 text-xs">
+                    <div id="profileBioWrapper" class="hidden">
+                        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Hakkında</div>
+                        <div id="profileModalBio" class="text-gray-200 whitespace-pre-wrap leading-relaxed bg-[#111214] p-3 rounded-lg border border-white/5 text-[13px]"></div>
+                    </div>
+                    <div id="profileExtraFields" class="grid grid-cols-2 gap-2 empty:hidden"></div>
+                    <div id="profileRolesWrapper">
+                        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Roller</div>
+                        <div id="profileModalRoles" class="flex flex-wrap gap-1.5"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AVATAR TAM EKRAN BÜYÜTME MODALI -->
+    <div id="avatarZoomModal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-sm z-[230] flex items-center justify-center p-4 cursor-zoom-out" onclick="closeAvatarZoomModal()">
+        <button onclick="closeAvatarZoomModal()" class="absolute top-5 right-5 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 p-2.5 rounded-full transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+        <img id="avatarZoomImg" src="" class="max-w-[90vw] max-h-[85vh] rounded-2xl object-contain shadow-2xl border border-white/10 cursor-default" onclick="event.stopPropagation()">
+    </div>
+
+    <!-- ÇIKIŞ YAP MODAL -->
+    <div id="logoutModal" class="hidden fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-mc-sidebar border border-white/10 p-6 rounded-xl shadow-2xl w-full max-w-sm">
+            <h3 class="text-white font-bold text-xl mb-2">Çıkış Yap</h3>
+            <p class="text-gray-400 text-sm mb-6">Hesabınızdan çıkış yapmak istediğinize emin misiniz?</p>
+            <div class="flex justify-end gap-3">
+                <button onclick="closeLogoutModal()" class="px-5 py-2.5 rounded-lg text-gray-300 hover:text-white hover:bg-white/5 text-sm font-medium transition-colors">İptal</button>
+                <button onclick="confirmLogout()" class="px-5 py-2.5 bg-mc-red hover:bg-[#d93a3d] rounded-lg text-white text-sm font-medium transition-colors shadow-lg">Çıkış Yap</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KURALLAR (NORMS) MODAL -->
+    <div id="normsModal" class="hidden fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4">
+        <div class="bg-[#313338] w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center bg-[#2b2d31]">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2">
+                    <svg class="w-5 h-5 text-mc-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    Topluluk Kuralları
+                </h3>
+                <button onclick="closeNormsModal()" class="text-gray-400 hover:text-white cursor-pointer"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1 custom-scrollbar text-gray-300 text-sm">
+                <div id="normsModalContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BİLDİRİMLER MODAL -->
+    <div id="notificationsModal" class="hidden fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+        <div class="bg-[#313338] w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center bg-[#2b2d31]">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2">🔔 Bildirimler</h3>
+                <button onclick="closeNotificationsModal()" class="text-gray-400 hover:text-white cursor-pointer"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 custom-scrollbar text-gray-300 text-sm">
+                <div class="text-center text-gray-500 py-10">Henüz yeni bildiriminiz yok.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DM MODAL -->
+    <div id="dmsModal" class="hidden fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+        <div class="bg-[#313338] w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center bg-[#2b2d31]">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2">💬 Direkt Mesajlar</h3>
+                <button onclick="closeDMsModal()" class="text-gray-400 hover:text-white cursor-pointer"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 custom-scrollbar text-gray-300 text-sm">
+                <div class="text-center text-gray-500 py-10">Özel mesaj kutunuz boş.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ETKİNLİKLER MODAL -->
+    <div id="eventsModal" class="hidden fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+        <div class="bg-[#313338] w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="p-4 border-b border-white/5 flex justify-between items-center bg-[#2b2d31]">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2">📅 Etkinlikler</h3>
+                <button onclick="closeEventsModal()" class="text-gray-400 hover:text-white cursor-pointer"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1 custom-scrollbar text-gray-300 text-sm">
+                <div class="text-center text-gray-500 py-10">Yaklaşan etkinlik bulunmuyor.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODÜLER JAVASCRIPT DOSYALARI -->
+    <script src="js/state.js"></script>
+    <script src="js/signalr.js"></script>
+    <script src="js/media.js"></script>
+    <!-- Yardımcı modüller ve alt bileşenler -->
+
+    <script src="js/ui-core.js"></script>
+    <script src="js/ui-diagnostics.js"></script>
+    <script src="js/ui-video-grid.js"></script>
+    <script src="js/ui-sidebar-layout.js"></script>
+    <script src="js/ui-modals.js"></script>
+    <script src="js/ui-auth-profile.js"></script>
+    <script src="js/ui-channels.js"></script>
+    <script src="js/chat-messages.js"></script>
+    <script src="js/chat-profile-feed.js"></script>
+    <script src="js/chat-reactions-viewer.js"></script>
+</body>
+</html>
